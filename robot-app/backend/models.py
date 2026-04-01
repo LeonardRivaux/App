@@ -1,7 +1,15 @@
-from sqlalchemy import Column, Integer, String
-from sqlalchemy.orm import declarative_base
+from sqlalchemy import Column, Integer, String, ForeignKey
+from database import Base
 
-Base = declarative_base()
+
+class RobotDB(Base):
+    __tablename__ = "robots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="available")
+    ip_address = Column(String, nullable=True)
+
 
 class MissionDB(Base):
     __tablename__ = "missions"
@@ -10,3 +18,4 @@ class MissionDB(Base):
     start = Column(String, nullable=False)
     end = Column(String, nullable=False)
     status = Column(String, nullable=False, default="pending")
+    robot_id = Column(Integer, ForeignKey("robots.id"), nullable=True)
