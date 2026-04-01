@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Robot App</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <h1>Créer une mission</h1>
+
+    <form id="missionForm">
+      <label for="start">Point de départ</label>
+      <input type="text" id="start" name="start" placeholder="Ex: Salle A" required />
+
+      <label for="end">Point d’arrivée</label>
+      <input type="text" id="end" name="end" placeholder="Ex: Salle B" required />
+
+      <button type="submit">Envoyer la mission</button>
+    </form>
+
+    <div class="result">
+      <h2>Dernière réponse du serveur</h2>
+      <pre id="output">Aucune mission envoyée.</pre>
+    </div>
+
+    <div class="result">
+      <h2>Liste des missions</h2>
+      <pre id="missionsList">Aucune mission.</pre>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
