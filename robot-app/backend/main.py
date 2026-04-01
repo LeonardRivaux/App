@@ -199,3 +199,20 @@ def delete_mission(mission_id: int, db: Session = Depends(get_db)):
     db.commit()
 
     return {"message": "Mission supprimée avec succès"}
+
+# # Test communication with backend server
+
+# @app.put("/missions/{mission_id}", response_model=MissionResponse)
+# def update_mission(mission_id: int, mission: MissionCreate, db: Session = Depends(get_db)):
+#     db_mission = db.query(MissionDB).filter(MissionDB.id == mission_id).first()
+
+#     if not db_mission:
+#         raise HTTPException(status_code=404, detail="Mission non trouvée")
+
+#     db_mission.start = mission.start
+#     db_mission.end = mission.end
+
+#     db.commit()
+#     db.refresh(db_mission)
+
+#     return db_mission
