@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -5,10 +7,28 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal, engine
 from models import Base, MissionDB, RobotDB
+from mqtt_client import publish_mission, start_mqtt_subscriber_in_background
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Robot App API", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # démarrage du subscriber MQTT en tâche de fond
+    start_mqtt_subscriber_in_background()
+
+    # init robots
+    with SessionLocal() as db:
+        init_robots(db)
+
+    yield
+
+
+app = FastAPI(
+    title="Robot App API",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -62,34 +82,59 @@ def get_db():
 
 
 # -------------------------
-# Core logic: assign pending missions to free robots
-# Called whenever a robot becomes available
+# MQTT helpers
 # -------------------------
 
+def send_mission_to_robot(db: Session, mission: MissionDB, robot: RobotDB):
+    result = publish_mission(
+        robot_id=robot.id,
+        mission_id=mission.id,
+        start=mission.start,
+        end=mission.end
+    )
+
+    if not result["success"]:
+        robot.status = "available"
+        mission.status = "pending"
+        mission.robot_id = None
+        db.commit()
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Échec envoi MQTT : {result['error']}"
+        )
+
+
+def assign_mission_to_robot(db: Session, mission: MissionDB, robot: RobotDB):
+    robot.status = "busy"
+    mission.status = "assigned"
+    mission.robot_id = robot.id
+    db.commit()
+    db.refresh(mission)
+    db.refresh(robot)
+
+    send_mission_to_robot(db, mission, robot)
+
+
 def assign_pending_missions(db: Session):
-    """
-    Scans for pending missions (FIFO order) and assigns them
-    to any available robots. Called after a robot is freed.
-    """
     while True:
         robot = db.query(RobotDB).filter(RobotDB.status == "available").first()
         if not robot:
-            break  # No free robot, stop
+            break
 
         mission = (
             db.query(MissionDB)
             .filter(MissionDB.status == "pending")
-            .order_by(MissionDB.id.asc())  # FIFO
+            .order_by(MissionDB.id.asc())
             .first()
         )
         if not mission:
-            break  # No pending mission, stop
+            break
 
-        # Assign robot to mission
-        robot.status = "busy"
-        mission.status = "assigned"
-        mission.robot_id = robot.id
-        db.commit()
+        try:
+            assign_mission_to_robot(db, mission, robot)
+        except HTTPException:
+            break
 
 
 # -------------------------
@@ -104,10 +149,6 @@ def init_robots(db: Session):
         ]
         db.add_all(robots)
         db.commit()
-
-
-with SessionLocal() as db:
-    init_robots(db)
 
 
 # -------------------------
@@ -139,26 +180,22 @@ def get_mission(mission_id: int, db: Session = Depends(get_db)):
 
 @app.post("/missions", response_model=MissionResponse, status_code=201)
 def create_mission(mission: MissionCreate, db: Session = Depends(get_db)):
-    # Try to assign an available robot immediately
-    robot = db.query(RobotDB).filter(RobotDB.status == "available").first()
-
-    if robot:
-        robot.status = "busy"
-        mission_status = "assigned"
-        robot_id = robot.id
-    else:
-        mission_status = "pending"
-        robot_id = None
-
     new_mission = MissionDB(
         start=mission.start,
         end=mission.end,
-        status=mission_status,
-        robot_id=robot_id,
+        status="pending",
+        robot_id=None,
     )
     db.add(new_mission)
     db.commit()
     db.refresh(new_mission)
+
+    robot = db.query(RobotDB).filter(RobotDB.status == "available").first()
+
+    if robot:
+        assign_mission_to_robot(db, new_mission, robot)
+        db.refresh(new_mission)
+
     return new_mission
 
 
@@ -177,10 +214,6 @@ def update_mission(mission_id: int, mission: MissionCreate, db: Session = Depend
 
 @app.post("/missions/{mission_id}/complete", response_model=MissionResponse)
 def complete_mission(mission_id: int, db: Session = Depends(get_db)):
-    """
-    Mark a mission as completed and free its robot.
-    Automatically reassigns any pending missions to the freed robot.
-    """
     db_mission = db.query(MissionDB).filter(MissionDB.id == mission_id).first()
     if not db_mission:
         raise HTTPException(status_code=404, detail="Mission non trouvée")
@@ -194,7 +227,6 @@ def complete_mission(mission_id: int, db: Session = Depends(get_db)):
             detail=f"Impossible de compléter une mission au statut '{db_mission.status}'"
         )
 
-    # Free the robot
     if db_mission.robot_id is not None:
         robot = db.query(RobotDB).filter(RobotDB.id == db_mission.robot_id).first()
         if robot:
@@ -203,7 +235,6 @@ def complete_mission(mission_id: int, db: Session = Depends(get_db)):
     db_mission.status = "completed"
     db.commit()
 
-    # Reassign pending missions now that a robot is free
     assign_pending_missions(db)
 
     db.refresh(db_mission)
@@ -212,10 +243,6 @@ def complete_mission(mission_id: int, db: Session = Depends(get_db)):
 
 @app.post("/missions/{mission_id}/cancel", response_model=MissionResponse)
 def cancel_mission(mission_id: int, db: Session = Depends(get_db)):
-    """
-    Cancel a mission (pending or assigned). Frees the robot if one was assigned.
-    Automatically reassigns any remaining pending missions.
-    """
     db_mission = db.query(MissionDB).filter(MissionDB.id == mission_id).first()
     if not db_mission:
         raise HTTPException(status_code=404, detail="Mission non trouvée")
@@ -244,7 +271,6 @@ def delete_mission(mission_id: int, db: Session = Depends(get_db)):
     if not db_mission:
         raise HTTPException(status_code=404, detail="Mission non trouvée")
 
-    # Free the robot if the mission was active
     if db_mission.status == "assigned" and db_mission.robot_id is not None:
         robot = db.query(RobotDB).filter(RobotDB.id == db_mission.robot_id).first()
         if robot:
@@ -253,7 +279,6 @@ def delete_mission(mission_id: int, db: Session = Depends(get_db)):
     db.delete(db_mission)
     db.commit()
 
-    # Reassign pending missions
     assign_pending_missions(db)
 
     return {"message": "Mission supprimée avec succès"}
