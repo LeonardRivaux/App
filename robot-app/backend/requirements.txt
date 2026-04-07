@@ -2,9 +2,4 @@ fastapi==0.115.2
 uvicorn==0.32.0
 python-multipart==0.0.12
 sqlalchemy==2.0.23
-<<<<<<< HEAD
-paho.mqtt.client==1.6.3
-json==2.0.9
-=======
-paho-mqtt==2.1.0s
->>>>>>> bc25b2e31589e57bb9a163678c5cf35621b87078
+paho-mqtt==2.1.0
