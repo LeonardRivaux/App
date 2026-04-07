@@ -19,7 +19,3 @@ services:
       - ./frontend:/app
     depends_on:
       - backend
-
-volumes:
-  backend:
-  frontend:
