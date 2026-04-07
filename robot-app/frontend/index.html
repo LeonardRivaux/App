@@ -4,32 +4,43 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Robot App</title>
-  <link rel="icon" type="image/png" href="favicon.jpg" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div class="container">
-    <h1>Créer une mission</h1>
+    <h1>Robot App</h1>
 
-    <form id="missionForm">
-      <label for="start">Point de départ</label>
-      <input type="text" id="start" name="start" placeholder="Ex: Salle A" required />
+    <!-- Robots -->
+    <section>
+      <h2>Flotte de robots</h2>
+      <div id="robotsList">Chargement…</div>
+    </section>
 
-      <label for="end">Point d’arrivée</label>
-      <input type="text" id="end" name="end" placeholder="Ex: Salle B" required />
+    <!-- Create mission -->
+    <section>
+      <h2>Créer une mission</h2>
+      <form id="missionForm">
+        <label for="start">Point de départ</label>
+        <input type="text" id="start" name="start" placeholder="Ex: Salle A" required />
+        <label for="end">Point d'arrivée</label>
+        <input type="text" id="end" name="end" placeholder="Ex: Salle B" required />
+        <button type="submit">Envoyer la mission</button>
+      </form>
+    </section>
 
-      <button type="submit">Envoyer la mission</button>
-    </form>
+    <!-- Last response -->
+    <section class="result">
+      <h2>Dernière réponse</h2>
+      <div id="output" style="padding:10px;background:#f8fafc;border-radius:8px;min-height:40px">
+        Aucune action effectuée.
+      </div>
+    </section>
 
-    <div class="result">
-      <h2>Dernière réponse du serveur</h2>
-      <pre id="output">Aucune mission envoyée.</pre>
-    </div>
-
-    <div class="result">
-      <h2>Liste des missions</h2>
-      <pre id="missionsList">Aucune mission.</pre>
-    </div>
+    <!-- Missions list -->
+    <section class="result">
+      <h2>Liste des missions <span id="refreshIndicator" style="font-size:13px;color:#888">(actualisation auto toutes les 5 s)</span></h2>
+      <div id="missionsList">Chargement…</div>
+    </section>
   </div>
 
   <script src="app.js"></script>

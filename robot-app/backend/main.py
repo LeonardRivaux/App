@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 from database import SessionLocal, engine
 from models import Base, MissionDB, RobotDB
 
-# Création des tables au démarrage si elles n'existent pas
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Robot App API", version="1.0.0")
@@ -63,6 +62,37 @@ def get_db():
 
 
 # -------------------------
+# Core logic: assign pending missions to free robots
+# Called whenever a robot becomes available
+# -------------------------
+
+def assign_pending_missions(db: Session):
+    """
+    Scans for pending missions (FIFO order) and assigns them
+    to any available robots. Called after a robot is freed.
+    """
+    while True:
+        robot = db.query(RobotDB).filter(RobotDB.status == "available").first()
+        if not robot:
+            break  # No free robot, stop
+
+        mission = (
+            db.query(MissionDB)
+            .filter(MissionDB.status == "pending")
+            .order_by(MissionDB.id.asc())  # FIFO
+            .first()
+        )
+        if not mission:
+            break  # No pending mission, stop
+
+        # Assign robot to mission
+        robot.status = "busy"
+        mission.status = "assigned"
+        mission.robot_id = robot.id
+        db.commit()
+
+
+# -------------------------
 # Init robots
 # -------------------------
 
@@ -89,50 +119,27 @@ def root():
     return {"message": "Serveur OK"}
 
 
-@app.get("/robots")
+@app.get("/robots", response_model=list[RobotResponse])
 def get_robots(db: Session = Depends(get_db)):
-    robots = db.query(RobotDB).all()
-
-    return [
-        {
-            "id": robot.id,
-            "name": robot.name,
-            "status": robot.status,
-            "ip_address": robot.ip_address
-        }
-        for robot in robots
-    ]
+    return db.query(RobotDB).all()
 
 
-@app.get("/missions")
+@app.get("/missions", response_model=list[MissionResponse])
 def get_missions(db: Session = Depends(get_db)):
-    missions = db.query(MissionDB).all()
-
-    return [
-        {
-            "id": mission.id,
-            "start": mission.start,
-            "end": mission.end,
-            "status": mission.status,
-            "robot_id": mission.robot_id
-        }
-        for mission in missions
-    ]
+    return db.query(MissionDB).all()
 
 
 @app.get("/missions/{mission_id}", response_model=MissionResponse)
 def get_mission(mission_id: int, db: Session = Depends(get_db)):
     mission = db.query(MissionDB).filter(MissionDB.id == mission_id).first()
-
     if not mission:
         raise HTTPException(status_code=404, detail="Mission non trouvée")
-
     return mission
 
 
-@app.post("/missions")
+@app.post("/missions", response_model=MissionResponse, status_code=201)
 def create_mission(mission: MissionCreate, db: Session = Depends(get_db)):
-    # Chercher un robot disponible
+    # Try to assign an available robot immediately
     robot = db.query(RobotDB).filter(RobotDB.status == "available").first()
 
     if robot:
@@ -147,50 +154,98 @@ def create_mission(mission: MissionCreate, db: Session = Depends(get_db)):
         start=mission.start,
         end=mission.end,
         status=mission_status,
-        robot_id=robot_id
+        robot_id=robot_id,
     )
-
     db.add(new_mission)
     db.commit()
     db.refresh(new_mission)
-
-    return {
-        "message": "Mission créée",
-        "mission": {
-            "id": new_mission.id,
-            "start": new_mission.start,
-            "end": new_mission.end,
-            "status": new_mission.status,
-            "robot_id": new_mission.robot_id
-        }
-    }
+    return new_mission
 
 
 @app.put("/missions/{mission_id}", response_model=MissionResponse)
 def update_mission(mission_id: int, mission: MissionCreate, db: Session = Depends(get_db)):
     db_mission = db.query(MissionDB).filter(MissionDB.id == mission_id).first()
-
     if not db_mission:
         raise HTTPException(status_code=404, detail="Mission non trouvée")
 
     db_mission.start = mission.start
     db_mission.end = mission.end
-
     db.commit()
     db.refresh(db_mission)
+    return db_mission
 
+
+@app.post("/missions/{mission_id}/complete", response_model=MissionResponse)
+def complete_mission(mission_id: int, db: Session = Depends(get_db)):
+    """
+    Mark a mission as completed and free its robot.
+    Automatically reassigns any pending missions to the freed robot.
+    """
+    db_mission = db.query(MissionDB).filter(MissionDB.id == mission_id).first()
+    if not db_mission:
+        raise HTTPException(status_code=404, detail="Mission non trouvée")
+
+    if db_mission.status == "completed":
+        raise HTTPException(status_code=400, detail="Mission déjà complétée")
+
+    if db_mission.status not in ("assigned",):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Impossible de compléter une mission au statut '{db_mission.status}'"
+        )
+
+    # Free the robot
+    if db_mission.robot_id is not None:
+        robot = db.query(RobotDB).filter(RobotDB.id == db_mission.robot_id).first()
+        if robot:
+            robot.status = "available"
+
+    db_mission.status = "completed"
+    db.commit()
+
+    # Reassign pending missions now that a robot is free
+    assign_pending_missions(db)
+
+    db.refresh(db_mission)
+    return db_mission
+
+
+@app.post("/missions/{mission_id}/cancel", response_model=MissionResponse)
+def cancel_mission(mission_id: int, db: Session = Depends(get_db)):
+    """
+    Cancel a mission (pending or assigned). Frees the robot if one was assigned.
+    Automatically reassigns any remaining pending missions.
+    """
+    db_mission = db.query(MissionDB).filter(MissionDB.id == mission_id).first()
+    if not db_mission:
+        raise HTTPException(status_code=404, detail="Mission non trouvée")
+
+    if db_mission.status == "completed":
+        raise HTTPException(status_code=400, detail="Impossible d'annuler une mission complétée")
+
+    if db_mission.robot_id is not None:
+        robot = db.query(RobotDB).filter(RobotDB.id == db_mission.robot_id).first()
+        if robot:
+            robot.status = "available"
+
+    db_mission.status = "cancelled"
+    db_mission.robot_id = None
+    db.commit()
+
+    assign_pending_missions(db)
+
+    db.refresh(db_mission)
     return db_mission
 
 
 @app.delete("/missions/{mission_id}")
 def delete_mission(mission_id: int, db: Session = Depends(get_db)):
     db_mission = db.query(MissionDB).filter(MissionDB.id == mission_id).first()
-
     if not db_mission:
         raise HTTPException(status_code=404, detail="Mission non trouvée")
 
-    # Si la mission avait un robot assigné, le libérer
-    if db_mission.robot_id is not None:
+    # Free the robot if the mission was active
+    if db_mission.status == "assigned" and db_mission.robot_id is not None:
         robot = db.query(RobotDB).filter(RobotDB.id == db_mission.robot_id).first()
         if robot:
             robot.status = "available"
@@ -198,21 +253,7 @@ def delete_mission(mission_id: int, db: Session = Depends(get_db)):
     db.delete(db_mission)
     db.commit()
 
+    # Reassign pending missions
+    assign_pending_missions(db)
+
     return {"message": "Mission supprimée avec succès"}
-
-# # Test communication with backend server
-
-# @app.put("/missions/{mission_id}", response_model=MissionResponse)
-# def update_mission(mission_id: int, mission: MissionCreate, db: Session = Depends(get_db)):
-#     db_mission = db.query(MissionDB).filter(MissionDB.id == mission_id).first()
-
-#     if not db_mission:
-#         raise HTTPException(status_code=404, detail="Mission non trouvée")
-
-#     db_mission.start = mission.start
-#     db_mission.end = mission.end
-
-#     db.commit()
-#     db.refresh(db_mission)
-
-#     return db_mission
