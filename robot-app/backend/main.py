@@ -15,7 +15,7 @@ Base.metadata.create_all(bind=engine)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # démarrage du subscriber MQTT en tâche de fond
-    start_mqtt_subscriber_in_background()
+    # start_mqtt_subscriber_in_background()
 
     # init robots
     with SessionLocal() as db:
