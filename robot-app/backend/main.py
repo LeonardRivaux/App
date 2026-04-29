@@ -161,13 +161,13 @@ def assign_mission_to_robot(db: Session, mission: MissionDB, robot: RobotDB):
         end=mission.end,
     )
 
-    if not result["success"]:
-        # Annule les changements en mémoire sans toucher la DB
-        db.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Échec envoi MQTT : {result['error']}",
-        )
+    #if not result["success"]:
+    #    # Annule les changements en mémoire sans toucher la DB
+    #    db.rollback()
+    #    raise HTTPException(
+    #        status_code=500,
+    #       detail=f"Échec envoi MQTT : {result['error']}",
+    #    )
 
     # MQTT OK → on persiste maintenant
     db.commit()
