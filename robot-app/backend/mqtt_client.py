@@ -5,7 +5,7 @@ import paho.mqtt.client as mqtt
 from database import SessionLocal
 from models import MissionDB, RobotDB
 
-BROKER_HOST = "10.164.94.237"
+BROKER_HOST = "192.168.137.56"
 BROKER_PORT = 1883
 
 # QoS utilisé pour les publications critiques — aligné avec mqtt_bridge_node.py
