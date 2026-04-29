@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Depends, HTTPException
@@ -10,6 +11,41 @@ from models import Base, MissionDB, RobotDB
 from mqtt_client import publish_mission, start_mqtt_subscriber_in_background
 
 Base.metadata.create_all(bind=engine)
+
+# Intervalle entre chaque tentative de retry (secondes)
+MQTT_RETRY_INTERVAL = 30
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Tâche de retry : relance les missions pending sans robot assigné
+# ─────────────────────────────────────────────────────────────────────
+
+async def retry_pending_missions_task():
+    """
+    Tâche asyncio qui tourne en arrière-plan toute la durée de vie du serveur.
+    Toutes les MQTT_RETRY_INTERVAL secondes, elle cherche les missions 'pending'
+    sans robot assigné et tente de les envoyer si un robot est disponible.
+    Utile lorsque le broker MQTT était inaccessible lors de la création initiale.
+    """
+    while True:
+        await asyncio.sleep(MQTT_RETRY_INTERVAL)
+        db = SessionLocal()
+        try:
+            pending = (
+                db.query(MissionDB)
+                .filter(MissionDB.status == "pending", MissionDB.robot_id == None)
+                .order_by(MissionDB.id.asc())
+                .all()
+            )
+            if pending:
+                print(f"[RETRY] {len(pending)} mission(s) pending détectée(s) — tentative d'assignation")
+                assign_pending_missions(db)
+            else:
+                print("[RETRY] Aucune mission pending en attente")
+        except Exception as e:
+            print(f"[RETRY] Erreur pendant le retry : {e}")
+        finally:
+            db.close()
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -28,7 +64,17 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    # Lance la tâche de retry en arrière-plan
+    retry_task = asyncio.create_task(retry_pending_missions_task())
+
     yield
+
+    # Arrêt propre de la tâche au shutdown
+    retry_task.cancel()
+    try:
+        await retry_task
+    except asyncio.CancelledError:
+        pass
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -96,13 +142,18 @@ def get_db():
 # MQTT helpers
 # ─────────────────────────────────────────────────────────────────────
 
-def send_mission_to_robot(db: Session, mission: MissionDB, robot: RobotDB):
+def assign_mission_to_robot(db: Session, mission: MissionDB, robot: RobotDB):
     """
-    Envoie la mission via MQTT.
-    Si l'envoi échoue, annule l'assignation en DB avant de lever l'exception.
-    Le commit DB est fait ICI après confirmation de l'envoi MQTT,
-    pour garantir la cohérence entre l'état DB et l'état réel du robot.
+    Assigne une mission à un robot :
+    1. Modifie les objets en mémoire (pas encore de commit)
+    2. Envoie via MQTT (wait_for_publish QoS 1)
+    3. Commit DB uniquement si l'envoi MQTT a réussi
+       → le robot n'est jamais marqué 'busy' en DB si le message n'est pas parti
     """
+    robot.status     = "busy"
+    mission.status   = "assigned"
+    mission.robot_id = robot.id
+
     result = publish_mission(
         robot_id=robot.id,
         mission_id=mission.id,
@@ -111,40 +162,25 @@ def send_mission_to_robot(db: Session, mission: MissionDB, robot: RobotDB):
     )
 
     if not result["success"]:
-        # Rollback de l'assignation : le robot redevient disponible
-        robot.status     = "available"
-        mission.status   = "pending"
-        mission.robot_id = None
-        db.commit()
-
+        # Annule les changements en mémoire sans toucher la DB
+        db.rollback()
         raise HTTPException(
             status_code=500,
             detail=f"Échec envoi MQTT : {result['error']}",
         )
 
-
-def assign_mission_to_robot(db: Session, mission: MissionDB, robot: RobotDB):
-    """
-    Assigne une mission à un robot :
-    1. Met à jour la DB (robot busy, mission assigned)
-    2. Envoie via MQTT — rollback automatique si échec
-    """
-    robot.status     = "busy"
-    mission.status   = "assigned"
-    mission.robot_id = robot.id
+    # MQTT OK → on persiste maintenant
     db.commit()
     db.refresh(mission)
     db.refresh(robot)
-
-    # Si MQTT échoue, send_mission_to_robot rollback et lève HTTPException
-    send_mission_to_robot(db, mission, robot)
 
 
 def assign_pending_missions(db: Session):
     """
     Boucle d'attribution : assigne les missions en attente
     aux robots disponibles, dans l'ordre d'arrivée (id asc).
-    S'arrête dès qu'il n'y a plus de robot ou de mission disponible.
+    S'arrête dès qu'il n'y a plus de robot ou de mission disponible,
+    ou en cas d'échec MQTT.
     """
     while True:
         robot = db.query(RobotDB).filter(RobotDB.status == "available").first()
@@ -153,7 +189,7 @@ def assign_pending_missions(db: Session):
 
         mission = (
             db.query(MissionDB)
-            .filter(MissionDB.status == "pending")
+            .filter(MissionDB.status == "pending", MissionDB.robot_id == None)
             .order_by(MissionDB.id.asc())
             .first()
         )
@@ -163,7 +199,8 @@ def assign_pending_missions(db: Session):
         try:
             assign_mission_to_robot(db, mission, robot)
         except HTTPException:
-            # Échec MQTT sur ce robot — on arrête pour éviter une boucle infinie
+            # Échec MQTT — inutile de retenter les autres missions maintenant,
+            # la tâche de retry s'en chargera dans MQTT_RETRY_INTERVAL secondes
             break
 
 
@@ -235,7 +272,12 @@ def create_mission(mission: MissionCreate, db: Session = Depends(get_db)):
 
     robot = db.query(RobotDB).filter(RobotDB.status == "available").first()
     if robot:
-        assign_mission_to_robot(db, new_mission, robot)
+        try:
+            assign_mission_to_robot(db, new_mission, robot)
+        except HTTPException:
+            # MQTT indisponible — la mission reste pending,
+            # la tâche de retry tentera à nouveau dans MQTT_RETRY_INTERVAL secondes
+            pass
         db.refresh(new_mission)
 
     return new_mission
@@ -247,7 +289,6 @@ def update_mission(mission_id: int, mission: MissionCreate, db: Session = Depend
     if not db_mission:
         raise HTTPException(status_code=404, detail="Mission non trouvée")
 
-    # Interdit la modification d'une mission déjà en cours ou terminée
     if db_mission.status not in ("pending",):
         raise HTTPException(
             status_code=400,
@@ -271,7 +312,6 @@ def complete_mission(mission_id: int, db: Session = Depends(get_db)):
     if db_mission.status == "completed":
         raise HTTPException(status_code=400, detail="Mission déjà complétée")
 
-    # Accepte "assigned" ET "in_recovery" (robot bloqué mais pas encore failed)
     if db_mission.status not in ("assigned", "in_recovery"):
         raise HTTPException(
             status_code=400,
