@@ -41,6 +41,7 @@ async function loadRobots() {
 
 // ── Load missions ─────────────────────────────────────────────────────
 async function loadMissions() {
+  
   try {
     const res  = await fetch(`${API}/missions`);
     const data = await res.json();
@@ -49,7 +50,7 @@ async function loadMissions() {
       missionsList.innerHTML = "<p style='color:#888'>Aucune mission.</p>";
       return;
     }
-
+    
     missionsList.innerHTML = data.map(m => `
       <div class="card">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -85,6 +86,10 @@ form.addEventListener("submit", async (e) => {
   const start = document.getElementById("start").value;
   const end   = document.getElementById("end").value;
 
+  if (start === end) {
+    output.innerHTML = `<span style="color:#ef4444">⚠ Le départ et l'arrivée doivent être différents.</span>`;
+    return;
+  }
   try {
     const res  = await fetch(`${API}/missions`, {
       method: "POST",

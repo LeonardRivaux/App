@@ -22,9 +22,21 @@
       <h2>Créer une mission</h2>
       <form id="missionForm">
         <label for="start">Point de départ</label>
-        <input type="text" id="start" name="start" placeholder="Ex: Salle A" required />
+        <select id="start" name="start" required>
+          <option value="" disabled selected>-- Choisir un point --</option>
+          <option value="Salle A">Salle A</option>
+          <option value="Salle B">Salle B</option>
+          <option value="Salle C">Salle C</option>
+        </select>
+
         <label for="end">Point d'arrivée</label>
-        <input type="text" id="end" name="end" placeholder="Ex: Salle B" required />
+        <select id="end" name="end" required>
+          <option value="" disabled selected>-- Choisir un point --</option>
+          <option value="Salle A">Salle A</option>
+          <option value="Salle B">Salle B</option>
+          <option value="Salle C">Salle C</option>
+        </select>
+
         <button type="submit">Envoyer la mission</button>
       </form>
     </section>
