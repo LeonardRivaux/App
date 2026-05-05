@@ -21,4 +21,4 @@ client.publish("robot/mission", json.dumps(mission))
 
 print("Mission envoyée")
 
-client.disconnect()
+client.disconnect() 
