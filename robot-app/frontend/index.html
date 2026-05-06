@@ -11,49 +11,62 @@
   <div class="container">
     <h1>Robot App</h1>
 
-    <!-- Robots -->
-    <section>
-      <h2>Flotte de robots</h2>
-      <div id="robotsList">Chargement…</div>
-    </section>
+    <div class="layout">
 
-    <!-- Create mission -->
-    <section>
-      <h2>Créer une mission</h2>
-      <form id="missionForm">
-        <label for="start">Point de départ</label>
-        <select id="start" name="start" required>
-          <option value="" disabled selected>-- Choisir un point --</option>
-          <option value="Salle A">Salle A</option>
-          <option value="Salle B">Salle B</option>
-          <option value="Salle C">Salle C</option>
-        </select>
+      <!-- Colonne gauche -->
+      <div class="col-left">
 
-        <label for="end">Point d'arrivée</label>
-        <select id="end" name="end" required>
-          <option value="" disabled selected>-- Choisir un point --</option>
-          <option value="Salle A">Salle A</option>
-          <option value="Salle B">Salle B</option>
-          <option value="Salle C">Salle C</option>
-        </select>
+        <section>
+          <h2>Flotte de robots</h2>
+          <div id="robotsList">Chargement…</div>
+        </section>
 
-        <button type="submit">Envoyer la mission</button>
-      </form>
-    </section>
+        <section>
+          <h2>Créer une mission</h2>
+          <form id="missionForm">
+            <label for="start">Point de départ</label>
+            <select id="start" name="start" required>
+              <option value="" disabled selected>-- Choisir un point --</option>
+              <option value="Salle A">Salle A</option>
+              <option value="Salle B">Salle B</option>
+              <option value="Salle C">Salle C</option>
+            </select>
 
-    <!-- Last response -->
-    <section class="result">
-      <h2>Dernière réponse</h2>
-      <div id="output" style="padding:10px;background:#f8fafc;border-radius:8px;min-height:40px">
-        Aucune action effectuée.
+            <label for="end">Point d'arrivée</label>
+            <select id="end" name="end" required>
+              <option value="" disabled selected>-- Choisir un point --</option>
+              <option value="Salle A">Salle A</option>
+              <option value="Salle B">Salle B</option>
+              <option value="Salle C">Salle C</option>
+            </select>
+
+            <button type="submit">Envoyer la mission</button>
+          </form>
+        </section>
+
+        <section class="result">
+          <h2>Dernière réponse</h2>
+          <div id="output" style="padding:10px;background:#f8fafc;border-radius:8px;min-height:40px">
+            Aucune action effectuée.
+          </div>
+        </section>
+
+        <section class="result">
+          <h2>Liste des missions <span id="refreshIndicator" style="font-size:13px;color:#888">(actualisation auto toutes les 5 s)</span></h2>
+          <div id="missionsList">Chargement…</div>
+        </section>
+
       </div>
-    </section>
 
-    <!-- Missions list -->
-    <section class="result">
-      <h2>Liste des missions <span id="refreshIndicator" style="font-size:13px;color:#888">(actualisation auto toutes les 5 s)</span></h2>
-      <div id="missionsList">Chargement…</div>
-    </section>
+      <!-- Colonne droite -->
+      <div class="col-right">
+        <section class="map-section">
+          <h2>Carte</h2>
+          <canvas id="mapCanvas" width="600" height="500"></canvas>
+        </section>
+      </div>
+
+    </div>
   </div>
 
   <script src="app.js"></script>

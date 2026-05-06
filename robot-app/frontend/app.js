@@ -1,27 +1,145 @@
-const form = document.getElementById("missionForm");
-const output = document.getElementById("output");
+const form         = document.getElementById("missionForm");
+const output       = document.getElementById("output");
 const missionsList = document.getElementById("missionsList");
-const robotsList = document.getElementById("robotsList");
+const robotsList   = document.getElementById("robotsList");
+const canvas       = document.getElementById("mapCanvas");
+const ctx          = canvas.getContext("2d");
 
 const API = "http://127.0.0.1:8000";
 
-// ── Status badge colors ───────────────────────────────────────────────
+// ── Coordonnées des salles sur la carte (pixels) ──────────────────────
+// À ajuster quand tu auras les vraies coordonnées
+const LOCATIONS = {
+  "Salle A": { x: 100, y: 100 },
+  "Salle B": { x: 300, y: 350 },
+  "Salle C": { x: 500, y: 80  },
+};
+
+const LOCATION_COLORS = {
+  "Salle A": "#3b82f6",
+  "Salle B": "#8b5cf6",
+  "Salle C": "#f59e0b",
+};
+
+// ── Couleurs status ───────────────────────────────────────────────────
 const STATUS_COLORS = {
-  pending:   "#f59e0b",
-  assigned:  "#3b82f6",
-  completed: "#10b981",
-  cancelled: "#6b7280",
-  available: "#10b981",
-  busy:      "#ef4444",
+  pending:     "#f59e0b",
+  assigned:    "#3b82f6",
+  in_recovery: "#f97316",
+  completed:   "#10b981",
+  cancelled:   "#6b7280",
+  available:   "#10b981",
+  busy:        "#ef4444",
 };
 
 function badge(status) {
   const color = STATUS_COLORS[status] ?? "#999";
-  return `<span style="
-    background:${color};color:#fff;padding:2px 8px;
-    border-radius:12px;font-size:12px;font-weight:600;
-  ">${status}</span>`;
+  return `<span style="background:${color};color:#fff;padding:2px 8px;
+    border-radius:12px;font-size:12px;font-weight:600;">${status}</span>`;
 }
+
+// ── Carte ─────────────────────────────────────────────────────────────
+const mapImage = new Image();
+mapImage.src = "map_placeholder.png";
+
+// offset d'animation pour les pointillés
+let dashOffset = 0;
+
+function drawMap(activeMissions) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // fond gris si image non chargée
+  if (mapImage.complete && mapImage.naturalWidth > 0) {
+    ctx.drawImage(mapImage, 0, 0, canvas.width, canvas.height);
+  } else {
+    ctx.fillStyle = "#ccc";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  // Trajets des missions en cours (assigned ou in_recovery)
+  activeMissions.forEach((m, i) => {
+    const from = LOCATIONS[m.start];
+    const to   = LOCATIONS[m.end];
+    if (!from || !to) return;
+
+    const colors = ["#ef4444", "#3b82f6", "#f97316", "#8b5cf6"];
+    const color  = colors[i % colors.length];
+
+    ctx.save();
+    ctx.setLineDash([12, 8]);
+    ctx.lineDashOffset = -dashOffset;
+    ctx.strokeStyle    = color;
+    ctx.lineWidth      = 3;
+    ctx.shadowColor    = color;
+    ctx.shadowBlur     = 6;
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+    ctx.restore();
+
+    // Flèche au milieu du trajet
+    const mx = (from.x + to.x) / 2;
+    const my = (from.y + to.y) / 2;
+    const angle = Math.atan2(to.y - from.y, to.x - from.x);
+    ctx.save();
+    ctx.translate(mx, my);
+    ctx.rotate(angle);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(8, 0);
+    ctx.lineTo(-6, -5);
+    ctx.lineTo(-6, 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // Label robot
+    if (m.robot_id) {
+      ctx.fillStyle = color;
+      ctx.font      = "bold 11px monospace";
+      ctx.fillText(`Robot #${m.robot_id}`, mx + 10, my - 6);
+    }
+  });
+
+  // Points des salles
+  Object.entries(LOCATIONS).forEach(([name, pos]) => {
+    const color = LOCATION_COLORS[name] ?? "#555";
+
+    // Halo
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur  = 12;
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, 10, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.restore();
+
+    // Anneau blanc
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, 10, 0, Math.PI * 2);
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth   = 2;
+    ctx.stroke();
+
+    // Label
+    ctx.fillStyle = "#1e293b";
+    ctx.font      = "bold 13px monospace";
+    ctx.fillText(name, pos.x + 14, pos.y + 5);
+  });
+}
+
+// Animation des pointillés
+let activeMissionsCache = [];
+function animateMap() {
+  dashOffset = (dashOffset + 0.5) % 20;
+  drawMap(activeMissionsCache);
+  requestAnimationFrame(animateMap);
+}
+mapImage.onload = () => animateMap();
+// Démarre même si l'image tarde
+setTimeout(() => { if (!mapImage.complete) animateMap(); }, 500);
 
 // ── Load robots ───────────────────────────────────────────────────────
 async function loadRobots() {
@@ -41,16 +159,20 @@ async function loadRobots() {
 
 // ── Load missions ─────────────────────────────────────────────────────
 async function loadMissions() {
-  
   try {
     const res  = await fetch(`${API}/missions`);
     const data = await res.json();
+
+    // Met à jour le cache pour la carte
+    activeMissionsCache = data.filter(m =>
+      m.status === "assigned" || m.status === "in_recovery"
+    );
 
     if (data.length === 0) {
       missionsList.innerHTML = "<p style='color:#888'>Aucune mission.</p>";
       return;
     }
-    
+
     missionsList.innerHTML = data.map(m => `
       <div class="card">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -60,8 +182,8 @@ async function loadMissions() {
           ${m.robot_id ? `<span style="color:#888;font-size:13px">Robot #${m.robot_id}</span>` : ""}
         </div>
         <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-          ${m.status === "assigned" ? `
-            <button class="btn-success" onclick="completemission(${m.id})">✔ Compléter</button>
+          ${["assigned","in_recovery"].includes(m.status) ? `
+            <button class="btn-success" onclick="completeMission(${m.id})">✔ Compléter</button>
           ` : ""}
           ${["pending","assigned"].includes(m.status) ? `
             <button class="btn-danger" onclick="cancelMission(${m.id})">✖ Annuler</button>
@@ -90,6 +212,7 @@ form.addEventListener("submit", async (e) => {
     output.innerHTML = `<span style="color:#ef4444">⚠ Le départ et l'arrivée doivent être différents.</span>`;
     return;
   }
+
   try {
     const res  = await fetch(`${API}/missions`, {
       method: "POST",
@@ -106,7 +229,7 @@ form.addEventListener("submit", async (e) => {
 });
 
 // ── Complete mission ──────────────────────────────────────────────────
-async function completemission(id) {
+async function completeMission(id) {
   try {
     const res  = await fetch(`${API}/missions/${id}/complete`, { method: "POST" });
     const data = await res.json();
