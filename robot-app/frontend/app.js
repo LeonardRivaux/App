@@ -21,6 +21,10 @@ const LOCATION_COLORS = {
   "Salle C": "#f59e0b",
 };
 
+// IDs de missions avec une action réseau en cours (évite le spam click)
+const pendingActions = new Set();
+let isFormSubmitting = false;
+
 // ── Couleurs status ───────────────────────────────────────────────────
 const STATUS_COLORS = {
   pending:     "#f59e0b",
@@ -183,12 +187,12 @@ async function loadMissions() {
         </div>
         <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
           ${["assigned","in_recovery"].includes(m.status) ? `
-            <button class="btn-success" onclick="completeMission(${m.id})">✔ Compléter</button>
+            <button class="btn-success" onclick="completeMission(${m.id}, this)">✔ Compléter</button>
           ` : ""}
           ${["pending","assigned"].includes(m.status) ? `
-            <button class="btn-danger" onclick="cancelMission(${m.id})">✖ Annuler</button>
+            <button class="btn-danger" onclick="cancelMission(${m.id}, this)">✖ Annuler</button>
           ` : ""}
-          <button class="btn-delete" onclick="deleteMission(${m.id})">🗑 Supprimer</button>
+          <button class="btn-delete" onclick="deleteMission(${m.id}, this)">🗑 Supprimer</button>
         </div>
       </div>
     `).join("");
@@ -205,13 +209,19 @@ function refresh() {
 // ── Create mission ────────────────────────────────────────────────────
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const start = document.getElementById("start").value;
-  const end   = document.getElementById("end").value;
+  if (isFormSubmitting) return;
+
+  const start     = document.getElementById("start").value;
+  const end       = document.getElementById("end").value;
+  const submitBtn = form.querySelector('button[type="submit"]');
 
   if (start === end) {
     output.innerHTML = `<span style="color:#ef4444">⚠ Le départ et l'arrivée doivent être différents.</span>`;
     return;
   }
+
+  isFormSubmitting = true;
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = "Envoi…"; }
 
   try {
     const res  = await fetch(`${API}/missions`, {
@@ -225,11 +235,17 @@ form.addEventListener("submit", async (e) => {
     refresh();
   } catch (err) {
     output.textContent = "Erreur : " + err.message;
+  } finally {
+    isFormSubmitting = false;
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Envoyer la mission"; }
   }
 });
 
 // ── Complete mission ──────────────────────────────────────────────────
-async function completeMission(id) {
+async function completeMission(id, btn) {
+  if (pendingActions.has(id)) return;
+  pendingActions.add(id);
+  if (btn) { btn.disabled = true; btn.textContent = "…"; }
   try {
     const res  = await fetch(`${API}/missions/${id}/complete`, { method: "POST" });
     const data = await res.json();
@@ -238,11 +254,17 @@ async function completeMission(id) {
     refresh();
   } catch (err) {
     output.innerHTML = `<span style="color:#ef4444">Erreur : ${err.message}</span>`;
+    if (btn) { btn.disabled = false; btn.textContent = "✔ Compléter"; }
+  } finally {
+    pendingActions.delete(id);
   }
 }
 
 // ── Cancel mission ────────────────────────────────────────────────────
-async function cancelMission(id) {
+async function cancelMission(id, btn) {
+  if (pendingActions.has(id)) return;
+  pendingActions.add(id);
+  if (btn) { btn.disabled = true; btn.textContent = "…"; }
   try {
     const res  = await fetch(`${API}/missions/${id}/cancel`, { method: "POST" });
     const data = await res.json();
@@ -251,12 +273,18 @@ async function cancelMission(id) {
     refresh();
   } catch (err) {
     output.innerHTML = `<span style="color:#ef4444">Erreur : ${err.message}</span>`;
+    if (btn) { btn.disabled = false; btn.textContent = "✖ Annuler"; }
+  } finally {
+    pendingActions.delete(id);
   }
 }
 
 // ── Delete mission ────────────────────────────────────────────────────
-async function deleteMission(id) {
+async function deleteMission(id, btn) {
   if (!confirm(`Supprimer la mission #${id} ?`)) return;
+  if (pendingActions.has(id)) return;
+  pendingActions.add(id);
+  if (btn) { btn.disabled = true; btn.textContent = "…"; }
   try {
     const res  = await fetch(`${API}/missions/${id}`, { method: "DELETE" });
     const data = await res.json();
@@ -265,6 +293,9 @@ async function deleteMission(id) {
     refresh();
   } catch (err) {
     output.innerHTML = `<span style="color:#ef4444">Erreur : ${err.message}</span>`;
+    if (btn) { btn.disabled = false; btn.textContent = "🗑 Supprimer"; }
+  } finally {
+    pendingActions.delete(id);
   }
 }
 

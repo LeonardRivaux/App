@@ -161,13 +161,13 @@ def assign_mission_to_robot(db: Session, mission: MissionDB, robot: RobotDB):
         end=mission.end,
     )
 
-    #if not result["success"]:
-    #    # Annule les changements en mémoire sans toucher la DB
-    #    db.rollback()
-    #    raise HTTPException(
-    #        status_code=500,
-    #       detail=f"Échec envoi MQTT : {result['error']}",
-    #    )
+    if not result["success"]:
+        # Annule les changements en mémoire sans toucher la DB
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Échec envoi MQTT : {result['error']}",
+        )
 
     # MQTT OK → on persiste maintenant
     db.commit()
@@ -365,7 +365,7 @@ def delete_mission(mission_id: int, db: Session = Depends(get_db)):
     if not db_mission:
         raise HTTPException(status_code=404, detail="Mission non trouvée")
 
-    if db_mission.status == "assigned" and db_mission.robot_id is not None:
+    if db_mission.status in ("assigned", "in_recovery") and db_mission.robot_id is not None:
         robot = db.query(RobotDB).filter(RobotDB.id == db_mission.robot_id).first()
         if robot:
             robot.status = "available"
