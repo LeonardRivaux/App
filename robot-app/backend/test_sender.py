@@ -10,8 +10,8 @@ client.connect(BROKER, PORT, 60)
 
 mission = {
     "mission_id": 1,
-    "start": "Salle A",
-    "end": "Salle B"
+    "start": "Salle 1",
+    "end": "Salle 2"
 }
 
 # petit délai pour être sûr que la connexion est OK
