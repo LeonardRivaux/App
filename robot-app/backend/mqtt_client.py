@@ -29,6 +29,7 @@ def publish_mission(robot_id: int, mission_id: int, start: str, end: str):
         "robot_id":   robot_id,
         "start":      start,
         "end":        end,
+        
     }
 
     # client_id unique par envoi pour éviter les conflits sur le broker
