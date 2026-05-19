@@ -10,15 +10,17 @@ const API = "http://127.0.0.1:8000";
 // ── Coordonnées des salles sur la carte (pixels) ──────────────────────
 // À ajuster quand tu auras les vraies coordonnées
 const LOCATIONS = {
-  "Salle A": { x: 100, y: 100 },
-  "Salle B": { x: 300, y: 350 },
-  "Salle C": { x: 500, y: 80  },
+  "Salle 1": { x: 115, y: 130 },
+  "Salle 2": { x: 493, y: 130  },
+  "Salle 3": { x: 250, y: 375  },
+  "Salle 4": { x: 493, y: 375 },
 };
 
 const LOCATION_COLORS = {
-  "Salle A": "#3b82f6",
-  "Salle B": "#8b5cf6",
-  "Salle C": "#f59e0b",
+  "Salle 1": "#3b82f6",
+  "Salle 2": "#8b5cf6",
+  "Salle 3": "#f59e0b",
+  "Salle 4": "#10b981",
 };
 
 // IDs de missions avec une action réseau en cours (évite le spam click)
